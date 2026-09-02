@@ -64,6 +64,20 @@ function connect(code, token) {
   });
 }
 
+/** 握手偶爾會因為網路逾時失敗（真實 client 也會自動重連），所以測試同樣重試 */
+async function connectWithRetry(code, token, tries = 4) {
+  let lastErr;
+  for (let i = 0; i < tries; i++) {
+    try {
+      return await connect(code, token);
+    } catch (e) {
+      lastErr = e;
+      await new Promise((r) => setTimeout(r, 500 * (i + 1)));
+    }
+  }
+  throw lastErr;
+}
+
 const room = 'e2e-' + Math.random().toString(36).slice(2, 8);
 const secret = crypto.getRandomValues(new Uint8Array(32));
 const A = await deriveKeys(secret);
@@ -71,7 +85,7 @@ const A = await deriveKeys(secret);
 console.log(`\n房間：${room}\n`);
 
 console.log('1. 裝置 A 建立房間並連線');
-const a = await connect(room, A.authToken);
+const a = await connectWithRetry(room, A.authToken);
 const initA = await a.wait((m) => m.type === 'init');
 check('收到 init', initA.type === 'init');
 check('初始沒有內容', initA.clips.length === 0);
@@ -79,7 +93,7 @@ check('預設 TTL 7 天', initA.settings.ttlDays === 7, JSON.stringify(initA.set
 check('預設未釘選', initA.settings.pinned === false);
 
 console.log('\n2. 裝置 B 用同一把金鑰加入');
-const b = await connect(room, A.authToken);
+const b = await connectWithRetry(room, A.authToken);
 const initB = await b.wait((m) => m.type === 'init');
 check('B 也收到 init', initB.type === 'init');
 const peersA = await a.wait((m) => m.type === 'peers' && m.peers === 2);
@@ -101,9 +115,16 @@ const wrong = await deriveKeys(crypto.getRandomValues(new Uint8Array(32)));
 check('錯金鑰解密失敗', (await decrypt(wrong.encKey, addB.clip.payload)) === null);
 
 console.log('\n5. 同一組房間代碼、不同金鑰 → 伺服器直接拒絕握手');
-let rejected = false;
-try { await connect(room, wrong.authToken); } catch { rejected = true; }
-check('握手被拒絕', rejected);
+let rejectReason = null;
+try {
+  const bad = await connect(room, wrong.authToken);
+  bad.close();
+} catch (e) {
+  rejectReason = e.message;
+}
+// 逾時不算數——那是網路不穩，不是伺服器擋下來
+check('握手被拒絕', rejectReason !== null && !/timeout/i.test(rejectReason),
+      rejectReason === null ? '竟然連上了' : `原因是 ${rejectReason}`);
 
 console.log('\n6. 改設定（TTL 30 天 + 釘選）會廣播給所有人');
 b.send({ type: 'settings', ttlDays: 30, pinned: true });
@@ -126,7 +147,7 @@ a.send({ type: 'add', payload: p2 });
 await b.wait((m) => m.type === 'add');
 a.close(); b.close();
 await new Promise((r) => setTimeout(r, 600));
-const c = await connect(room, A.authToken);
+const c = await connectWithRetry(room, A.authToken);
 const initC = await c.wait((m) => m.type === 'init');
 check('重連後讀回 1 筆', initC.clips.length === 1, `got ${initC.clips.length}`);
 check('內容仍可解密', (await decrypt(A.encKey, initC.clips[0].payload)) === '重連前寫入的資料');
@@ -136,10 +157,73 @@ console.log('\n10. 清空');
 c.send({ type: 'clear' });
 await new Promise((r) => setTimeout(r, 400));
 c.close();
-const d = await connect(room, A.authToken);
+const d = await connectWithRetry(room, A.authToken);
 const initD = await d.wait((m) => m.type === 'init');
 check('清空後為 0 筆', initD.clips.length === 0);
 d.close();
+
+// ---------------------------------------------------------------- 配對碼
+
+const HTTP = target.replace(/\/$/, '');
+const PAIR_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+function randomPairCode() {
+  return [...crypto.getRandomValues(new Uint8Array(8))].map((b) => PAIR_ALPHABET[b % 32]).join('');
+}
+
+async function derivePairKeys(code) {
+  const material = await crypto.subtle.importKey('raw', te.encode(code), 'PBKDF2', false, ['deriveBits']);
+  const masterBits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', hash: 'SHA-256', salt: te.encode('text-sync:pair:v1'), iterations: 300000 },
+    material, 256,
+  );
+  const master = await crypto.subtle.importKey('raw', masterBits, 'HKDF', false, ['deriveKey', 'deriveBits']);
+  const h = (info) => ({ name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(0), info: te.encode(info) });
+  const slotBits = await crypto.subtle.deriveBits(h('text-sync:pair:slot:v1'), master, 256);
+  const encKey = await crypto.subtle.deriveKey(
+    h('text-sync:pair:enc:v1'), master, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt'],
+  );
+  return {
+    slotId: [...new Uint8Array(slotBits)].map((b) => b.toString(16).padStart(2, '0')).join(''),
+    encKey,
+  };
+}
+
+console.log('\n11. 配對碼：放進去、用另一組金鑰取回來');
+const roomUrl = `${HTTP}/r/${room}#k=${b64u.enc(secret)}`;
+const pairCode = randomPairCode();
+const pk = await derivePairKeys(pairCode);
+const putRes = await fetch(`${HTTP}/api/pair/${pk.slotId}`, {
+  method: 'PUT',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ payload: await encrypt(pk.encKey, roomUrl) }),
+});
+check('暫存成功', putRes.ok);
+
+const pk2 = await derivePairKeys(pairCode); // 模擬另一台電腦重新推導
+const getRes = await fetch(`${HTTP}/api/pair/${pk2.slotId}`);
+check('取得暫存格', getRes.ok);
+const got = await decrypt(pk2.encKey, (await getRes.json()).payload);
+check('解回原本的房間網址', got === roomUrl, String(got));
+
+console.log('\n12. 配對碼只能用一次');
+const again = await fetch(`${HTTP}/api/pair/${pk.slotId}`);
+check('第二次取用回 404', again.status === 404, `got ${again.status}`);
+
+console.log('\n13. 猜錯配對碼拿不到東西');
+const wrongPair = await derivePairKeys(randomPairCode());
+const wrongRes = await fetch(`${HTTP}/api/pair/${wrongPair.slotId}`);
+check('錯的配對碼回 404', wrongRes.status === 404, `got ${wrongRes.status}`);
+
+console.log('\n14. 配對格式防呆');
+const badSlot = await fetch(`${HTTP}/api/pair/notahexslotid`);
+check('非法 slotId 回 404', badSlot.status === 404, `got ${badSlot.status}`);
+const badPayload = await fetch(`${HTTP}/api/pair/${'a'.repeat(64)}`, {
+  method: 'PUT',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ payload: '' }),
+});
+check('空 payload 被擋', badPayload.status === 400, `got ${badPayload.status}`);
 
 console.log(`\n────────────\n通過 ${pass} 項，失敗 ${fail} 項\n`);
 process.exit(fail ? 1 : 0);

@@ -42,6 +42,17 @@
   </section>
 
   <section class="card">
+    <h2>用配對碼加入</h2>
+    <p class="hint">在已經進入房間的那台電腦按「分享 → 配對這台電腦」，把畫面上的 8 碼打進來。90 秒內有效，用過即失效。</p>
+    <div class="row">
+      <input id="pair-input" type="text" placeholder="例如 K7M2-9XPQ" autocomplete="off"
+             autocapitalize="characters" spellcheck="false" maxlength="12">
+      <button id="pair-join-btn" class="primary">加入</button>
+    </div>
+    <p id="pair-error" class="error" hidden></p>
+  </section>
+
+  <section class="card">
     <h2>加入房間</h2>
     <p class="hint">加入既有房間需要<strong>完整網址</strong>（含 <code>#</code> 後面的金鑰）。只有代碼是進不去的——金鑰不在伺服器上。</p>
     <div class="row">
@@ -115,6 +126,18 @@
       <button id="copy-url-btn" class="primary">複製</button>
     </div>
     <div id="qr" class="qr"></div>
+
+    <div class="pair-block">
+      <h3>另一台電腦沒相機？</h3>
+      <p class="hint">產生一組短碼，在另一台電腦的首頁輸入就能進來，不必打那串金鑰。</p>
+      <div id="pair-result" hidden>
+        <div class="pair-code" id="pair-code"></div>
+        <p class="hint" id="pair-countdown"></p>
+      </div>
+      <button id="pair-btn">配對這台電腦</button>
+      <p id="pair-gen-error" class="error" hidden></p>
+    </div>
+
     <button id="close-share" class="ghost close">關閉</button>
   </div>
 </div>

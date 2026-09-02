@@ -11,6 +11,8 @@ const MAX_CLIPS = 200;
 const DAY_MS = 86400 * 1000;
 const IDLE_REAP_DAYS = 30; // 空房閒置多久回收（釘選的房間不適用）
 const ALARM_INTERVAL_MS = DAY_MS;
+const PAIR_TTL_MS = 90 * 1000;      // 配對碼有效時間
+const MAX_PAIR_PAYLOAD = 8 * 1024;
 
 // ---------------------------------------------------------------- Worker
 
@@ -31,6 +33,14 @@ export default {
 };
 
 async function handleApi(request, env, url) {
+  // /api/pair/<slotId> — 一次性配對暫存格。
+  // slotId 是從配對碼慢雜湊出來的，伺服器拿不回配對碼，也就解不開裡面的密文。
+  const pm = url.pathname.match(/^\/api\/pair\/([0-9a-f]{64})$/);
+  if (pm) {
+    const stub = env.PAIR.get(env.PAIR.idFromName(pm[1]));
+    return stub.fetch(request);
+  }
+
   // /api/room/<code>/ws
   const m = url.pathname.match(/^\/api\/room\/([^/]+)\/ws$/);
   if (!m) return json({ error: 'not_found' }, 404);
@@ -86,6 +96,8 @@ export class RoomDO {
       );
     `);
     this.sql.exec(`CREATE INDEX IF NOT EXISTS idx_clips_created ON clips(created);`);
+
+    this.alarmEnsured = false;
   }
 
   // -------------------------------------------------------------- meta
@@ -126,6 +138,7 @@ export class RoomDO {
     }
 
     this.touch();
+    await this.ensureAlarm();
 
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
@@ -159,6 +172,7 @@ export class RoomDO {
     }
 
     this.touch();
+    await this.ensureAlarm();
 
     switch (msg.type) {
       case 'add': {
@@ -255,17 +269,29 @@ export class RoomDO {
 
     this.broadcast({ type: 'clips', clips: this.listClips() });
     await this.ctx.storage.setAlarm(Date.now() + ALARM_INTERVAL_MS);
+    this.alarmEnsured = true;
   }
 
   // -------------------------------------------------------------- helpers
 
   touch() {
     this.setMeta('last_seen', Date.now());
-    this.ctx.blockConcurrencyWhile(async () => {
+  }
+
+  /**
+   * 確保清理用的 alarm 有排。只在這個實例第一次需要時查一次——
+   * 每則訊息都查會讓每次往返都多付兩次儲存操作。
+   */
+  async ensureAlarm() {
+    if (this.alarmEnsured) return;
+    this.alarmEnsured = true;
+    try {
       if ((await this.ctx.storage.getAlarm()) === null) {
         await this.ctx.storage.setAlarm(Date.now() + ALARM_INTERVAL_MS);
       }
-    });
+    } catch {
+      this.alarmEnsured = false; // 下次再試
+    }
   }
 
   listClips() {
@@ -310,6 +336,60 @@ export class RoomDO {
   broadcastPeers(closing = null) {
     const n = this.ctx.getWebSockets().filter((ws) => ws !== closing).length;
     this.broadcast({ type: 'peers', peers: n }, closing);
+  }
+}
+
+// ---------------------------------------------------------------- Pair DO
+
+/**
+ * 配對用的一次性暫存格：電腦1 放進加密後的房間網址，電腦2 取走一次就沒了。
+ * 這裡存的是密文，解密金鑰只有知道配對碼的人算得出來。
+ */
+export class PairDO {
+  constructor(ctx) {
+    this.ctx = ctx;
+  }
+
+  async fetch(request) {
+    if (request.method === 'PUT') {
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'bad_json' }, 400);
+      }
+
+      const payload = typeof body.payload === 'string' ? body.payload : '';
+      if (!payload || payload.length > MAX_PAIR_PAYLOAD) {
+        return json({ error: 'bad_payload' }, 400);
+      }
+
+      const expires = Date.now() + PAIR_TTL_MS;
+      await this.ctx.storage.put({ payload, expires });
+      await this.ctx.storage.setAlarm(expires + 1000);
+      return json({ ok: true, expiresAt: expires, ttlMs: PAIR_TTL_MS });
+    }
+
+    if (request.method === 'GET') {
+      const rec = await this.ctx.storage.get(['payload', 'expires']);
+      const payload = rec.get('payload');
+      const expires = rec.get('expires');
+
+      // 取走就銷毀（含過期的殘骸），配對碼只能用一次
+      await this.ctx.storage.deleteAll();
+      await this.ctx.storage.deleteAlarm();
+
+      if (!payload || !expires || Date.now() > expires) {
+        return json({ error: 'not_found' }, 404);
+      }
+      return json({ payload });
+    }
+
+    return json({ error: 'method_not_allowed' }, 405);
+  }
+
+  async alarm() {
+    await this.ctx.storage.deleteAll();
   }
 }
 

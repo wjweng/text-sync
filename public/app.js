@@ -65,6 +65,78 @@ async function decryptText(encKey, payload) {
   }
 }
 
+// ---------------------------------------------------------------- 配對碼
+
+// 沒有 0/1/I/O，剛好 32 個字元 → 每碼 5 bits，8 碼 = 40 bits
+const PAIR_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const PAIR_LEN = 8;
+const PAIR_ITERATIONS = 300000;
+
+function randomPairCode() {
+  const bytes = crypto.getRandomValues(new Uint8Array(PAIR_LEN));
+  return [...bytes].map((b) => PAIR_ALPHABET[b % 32]).join('');
+}
+
+function normalizePairCode(input) {
+  return input.toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+function formatPairCode(code) {
+  return `${code.slice(0, 4)}-${code.slice(4)}`;
+}
+
+/**
+ * 從配對碼推出「暫存格位置」與「解密金鑰」。
+ *
+ * 兩者都掛在同一次 PBKDF2（30 萬次）之後，所以就算伺服器看到了 slotId，
+ * 想回推配對碼一樣得付出 30 萬次雜湊 × 2^40 種組合的代價。
+ */
+async function derivePairKeys(code) {
+  const material = await crypto.subtle.importKey('raw', te.encode(code), 'PBKDF2', false, ['deriveBits']);
+  const masterBits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', hash: 'SHA-256', salt: te.encode('text-sync:pair:v1'), iterations: PAIR_ITERATIONS },
+    material, 256,
+  );
+
+  const master = await crypto.subtle.importKey('raw', masterBits, 'HKDF', false, ['deriveKey', 'deriveBits']);
+  const hkdf = (info) => ({ name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(0), info: te.encode(info) });
+
+  const slotBits = await crypto.subtle.deriveBits(hkdf('text-sync:pair:slot:v1'), master, 256);
+  const encKey = await crypto.subtle.deriveKey(
+    hkdf('text-sync:pair:enc:v1'), master, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt'],
+  );
+
+  const slotId = [...new Uint8Array(slotBits)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  return { slotId, encKey };
+}
+
+/** 把目前房間的完整網址加密後放進暫存格，回傳配對碼 */
+async function createPairing(url) {
+  const code = randomPairCode();
+  const { slotId, encKey } = await derivePairKeys(code);
+  const payload = await encryptText(encKey, url);
+
+  const res = await fetch(`/api/pair/${slotId}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ payload }),
+  });
+  if (!res.ok) throw new Error('配對暫存失敗');
+
+  const { ttlMs } = await res.json();
+  return { code, ttlMs };
+}
+
+/** 用配對碼把網址取回來（取一次就沒了） */
+async function consumePairing(code) {
+  const { slotId, encKey } = await derivePairKeys(code);
+  const res = await fetch(`/api/pair/${slotId}`);
+  if (!res.ok) return null;
+
+  const { payload } = await res.json();
+  return decryptText(encKey, payload);
+}
+
 // ---------------------------------------------------------------- 本機記住的房間
 
 const store = {
@@ -269,6 +341,41 @@ $('join-btn').addEventListener('click', () => {
 
 $('join-url').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') $('join-btn').click();
+});
+
+$('pair-join-btn').addEventListener('click', async () => {
+  const err = $('pair-error');
+  const btn = $('pair-join-btn');
+  err.hidden = true;
+
+  const code = normalizePairCode($('pair-input').value);
+  if (code.length !== PAIR_LEN || [...code].some((c) => !PAIR_ALPHABET.includes(c))) {
+    err.textContent = `配對碼是 ${PAIR_LEN} 個字元，只會用到 ${PAIR_ALPHABET} 這些字（沒有 0、1、I、O）。`;
+    err.hidden = false;
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = '驗證中…';
+  try {
+    const url = await consumePairing(code);
+    if (!url) {
+      err.textContent = '這組配對碼無效、已過期，或已經被用掉了。請在另一台電腦重新產生一組。';
+      err.hidden = false;
+      return;
+    }
+    location.href = url;
+  } catch {
+    err.textContent = '連線失敗，請確認網路後再試。';
+    err.hidden = false;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '加入';
+  }
+});
+
+$('pair-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') $('pair-join-btn').click();
 });
 
 // ---------------------------------------------------------------- 房間
@@ -599,6 +706,7 @@ $('share-btn').addEventListener('click', () => {
   const url = location.href;
   $('share-url').value = url;
   $('share-modal').hidden = false;
+  resetPairUI();
 
   const box = $('qr');
   box.replaceChildren();
@@ -612,18 +720,67 @@ $('share-btn').addEventListener('click', () => {
   }
 });
 
+let pairTimer = null;
+
+function resetPairUI() {
+  clearInterval(pairTimer);
+  pairTimer = null;
+  $('pair-result').hidden = true;
+  $('pair-gen-error').hidden = true;
+  $('pair-btn').disabled = false;
+  $('pair-btn').textContent = '配對這台電腦';
+}
+
+$('pair-btn').addEventListener('click', async () => {
+  const btn = $('pair-btn');
+  const err = $('pair-gen-error');
+  err.hidden = true;
+  btn.disabled = true;
+  btn.textContent = '產生中…';
+
+  try {
+    const { code, ttlMs } = await createPairing(location.href);
+    $('pair-code').textContent = formatPairCode(code);
+    $('pair-result').hidden = false;
+    btn.textContent = '換一組';
+    btn.disabled = false;
+
+    clearInterval(pairTimer);
+    const deadline = Date.now() + ttlMs;
+    const tick = () => {
+      const left = Math.max(0, Math.round((deadline - Date.now()) / 1000));
+      $('pair-countdown').textContent = left > 0
+        ? `${left} 秒後失效，用過一次也會失效`
+        : '已失效，按「換一組」重新產生';
+      if (left === 0) clearInterval(pairTimer);
+    };
+    tick();
+    pairTimer = setInterval(tick, 1000);
+  } catch {
+    err.textContent = '產生配對碼失敗，請稍後再試。';
+    err.hidden = false;
+    btn.disabled = false;
+    btn.textContent = '配對這台電腦';
+  }
+});
+
 $('copy-url-btn').addEventListener('click', async () => {
   toast((await copy($('share-url').value)) ? '網址已複製' : '複製失敗，請手動選取');
 });
 
-$('close-share').addEventListener('click', () => { $('share-modal').hidden = true; });
+function closeShare() {
+  $('share-modal').hidden = true;
+  resetPairUI();
+}
+
+$('close-share').addEventListener('click', closeShare);
 
 $('share-modal').addEventListener('click', (e) => {
-  if (e.target === $('share-modal')) $('share-modal').hidden = true;
+  if (e.target === $('share-modal')) closeShare();
 });
 
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') $('share-modal').hidden = true;
+  if (e.key === 'Escape' && !$('share-modal').hidden) closeShare();
 });
 
 // ---------------------------------------------------------------- 啟動
