@@ -99,7 +99,10 @@
 <!-- ---------------------------------------------------------- 設定 -->
 <div id="settings-modal" class="modal" hidden>
   <div class="modal-box">
-    <h2>房間設定</h2>
+    <div class="modal-head">
+      <h2>房間設定</h2>
+      <button id="close-settings" class="modal-x" aria-label="關閉">&times;</button>
+    </div>
     <label class="field">
       <span>內容保留時間</span>
       <select id="ttl-select">
@@ -116,14 +119,16 @@
       <button id="clear-btn" class="danger">清空所有內容</button>
       <button id="forget-btn" class="danger ghost">在這台裝置忘記此房間</button>
     </div>
-    <button id="close-settings" class="ghost close">關閉</button>
   </div>
 </div>
 
 <!-- ---------------------------------------------------------- 分享 -->
 <div id="share-modal" class="modal" hidden>
   <div class="modal-box">
-    <h2>分享這個房間</h2>
+    <div class="modal-head">
+      <h2>分享這個房間</h2>
+      <button id="close-share" class="modal-x" aria-label="關閉">&times;</button>
+    </div>
     <p class="hint">拿到這個網址的人就能讀寫這個房間的內容。金鑰在 <code>#</code> 後面，缺一個字都進不去。</p>
     <div class="row">
       <input id="share-url" type="text" readonly>
@@ -141,8 +146,6 @@
       <button id="pair-btn">配對這台電腦</button>
       <p id="pair-gen-error" class="error" hidden></p>
     </div>
-
-    <button id="close-share" class="ghost close">關閉</button>
   </div>
 </div>
 

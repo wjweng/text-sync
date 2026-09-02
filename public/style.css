@@ -204,9 +204,24 @@ textarea { resize: vertical; min-height: 90px; font-family: inherit; }
              max-height: calc(100dvh - 32px); overflow-y: auto;
              box-shadow: 0 20px 60px rgba(0, 0, 0, .3); }
 .modal-box input { font-family: var(--mono); font-size: .8rem; }
+/* 標題列黏在頂端，彈窗內容捲動時關閉鍵不會跟著捲走 */
+.modal-head {
+  position: sticky; top: -22px; z-index: 1;
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+  margin: -22px -22px 12px; padding: 22px 22px 10px;
+  background: var(--surface);
+}
+.modal-head h2 { margin: 0; }
+.modal-x {
+  flex: none; width: 44px; height: 44px; margin: -12px -12px 0 0;
+  display: grid; place-items: center;
+  border: 0; background: transparent; color: var(--text-dim);
+  font-size: 1.5rem; line-height: 1; border-radius: 10px;
+}
+.modal-x:hover { background: var(--surface-2); color: var(--text); }
+
 .qr { display: flex; justify-content: center; margin-top: 18px; }
 .qr img, .qr canvas { border-radius: 10px; background: #fff; padding: 12px; }
-.close { width: 100%; margin-top: 18px; }
 
 /* ---------------------------------------------------------------- pairing */
 .pair-block { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border); }
