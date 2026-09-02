@@ -1,5 +1,8 @@
 // 端對端測試：模擬兩台裝置，驗證加密同步 / 認證 / 設定 / 刪除
-const BASE = 'ws://127.0.0.1:8787';
+// 預設打本機 dev server，給第一個參數就打那個網址：
+//   node test/e2e.mjs https://text-sync.example.workers.dev
+const target = process.argv[2] || 'http://127.0.0.1:8787';
+const BASE = target.replace(/^http/, 'ws').replace(/\/$/, '');
 const te = new TextEncoder(), td = new TextDecoder();
 let pass = 0, fail = 0;
 
@@ -47,7 +50,7 @@ function connect(code, token) {
     ws.addEventListener('open', () => { ws.send(JSON.stringify({ type: 'hello' })); resolve({
       ws,
       send: (m) => ws.send(JSON.stringify(m)),
-      wait: (match, ms = 4000) => new Promise((res, rej) => {
+      wait: (match, ms = 20000) => new Promise((res, rej) => {
         const hit = inbox.findIndex(match);
         if (hit >= 0) return res(inbox.splice(hit, 1)[0]);
         const t = setTimeout(() => rej(new Error('timeout waiting for message')), ms);
