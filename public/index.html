@@ -82,7 +82,23 @@
     </div>
   </section>
 
-  <section id="settings-panel" class="card" hidden>
+  <section class="composer">
+    <textarea id="input" placeholder="貼上或輸入文字…（Ctrl / ⌘ + Enter 送出）" rows="4"></textarea>
+    <div class="composer-bar">
+      <span id="typing" class="typing" hidden>有人正在輸入…</span>
+      <span class="grow"></span>
+      <span id="char-count" class="hint"></span>
+      <button id="send-btn" class="primary">送出</button>
+    </div>
+  </section>
+
+  <section id="clips" class="clips"></section>
+  <p id="empty-state" class="empty" hidden>還沒有內容。貼上第一段文字吧。</p>
+</main>
+
+<!-- ---------------------------------------------------------- 設定 -->
+<div id="settings-modal" class="modal" hidden>
+  <div class="modal-box">
     <h2>房間設定</h2>
     <label class="field">
       <span>內容保留時間</span>
@@ -100,21 +116,9 @@
       <button id="clear-btn" class="danger">清空所有內容</button>
       <button id="forget-btn" class="danger ghost">在這台裝置忘記此房間</button>
     </div>
-  </section>
-
-  <section class="composer">
-    <textarea id="input" placeholder="貼上或輸入文字…（Ctrl / ⌘ + Enter 送出）" rows="4"></textarea>
-    <div class="composer-bar">
-      <span id="typing" class="typing" hidden>有人正在輸入…</span>
-      <span class="grow"></span>
-      <span id="char-count" class="hint"></span>
-      <button id="send-btn" class="primary">送出</button>
-    </div>
-  </section>
-
-  <section id="clips" class="clips"></section>
-  <p id="empty-state" class="empty" hidden>還沒有內容。貼上第一段文字吧。</p>
-</main>
+    <button id="close-settings" class="ghost close">關閉</button>
+  </div>
+</div>
 
 <!-- ---------------------------------------------------------- 分享 -->
 <div id="share-modal" class="modal" hidden>

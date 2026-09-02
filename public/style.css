@@ -200,6 +200,8 @@ textarea { resize: vertical; min-height: 90px; font-family: inherit; }
          background: rgba(0, 0, 0, .5); }
 .modal-box { background: var(--surface); border: 1px solid var(--border);
              border-radius: 16px; padding: 22px; width: min(480px, 100%);
+             /* 內容變高時（例如分享視窗的 QR + 配對區）不要撐出畫面 */
+             max-height: calc(100dvh - 32px); overflow-y: auto;
              box-shadow: 0 20px 60px rgba(0, 0, 0, .3); }
 .modal-box input { font-family: var(--mono); font-size: .8rem; }
 .qr { display: flex; justify-content: center; margin-top: 18px; }

@@ -666,8 +666,21 @@ $('input').addEventListener('keydown', (e) => {
 $('send-btn').addEventListener('click', () => room?.submit());
 
 $('settings-btn').addEventListener('click', () => {
-  const p = $('settings-panel');
-  p.hidden = !p.hidden;
+  $('settings-modal').hidden = false;
+});
+
+function closeSettings() {
+  $('settings-modal').hidden = true;
+  // 清空鍵的「再按一次確認」狀態不要跨次留著
+  const btn = $('clear-btn');
+  btn.dataset.armed = '0';
+  btn.textContent = '清空所有內容';
+}
+
+$('close-settings').addEventListener('click', closeSettings);
+
+$('settings-modal').addEventListener('click', (e) => {
+  if (e.target === $('settings-modal')) closeSettings();
 });
 
 $('ttl-select').addEventListener('change', (e) => {
@@ -780,7 +793,9 @@ $('share-modal').addEventListener('click', (e) => {
 });
 
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && !$('share-modal').hidden) closeShare();
+  if (e.key !== 'Escape') return;
+  if (!$('share-modal').hidden) closeShare();
+  else if (!$('settings-modal').hidden) closeSettings();
 });
 
 // ---------------------------------------------------------------- 啟動
@@ -831,6 +846,6 @@ addEventListener('hashchange', () => {
   $('input').value = '';
   updateCharCount();
   $('share-modal').hidden = true;
-  $('settings-panel').hidden = true;
+  $('settings-modal').hidden = true;
   boot();
 });
