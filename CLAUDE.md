@@ -165,7 +165,7 @@ npx wrangler deploy
 憑證是 OAuth，存在**電腦1（wjweng）**的 `~/.config/.wrangler/config/default.toml`。
 換一台電腦要先 `npx wrangler login`。
 
-`Dropbox/Agent/000_Agent/.env` 裡的 `CLOUDFLARE_API_TOKEN` **不能用來部署**——
+`~/.config/agent/secrets.env` 裡的 `CLOUDFLARE_API_TOKEN` **不能用來部署**——
 那顆是 2026-08-09 為 Workers AI 生圖建的，只有 AI 權限，打 `workers/scripts` 會回
 `Authentication error`。要用 token 部署得另外建一顆（Workers Scripts Edit +
 Workers KV Storage Edit + Account Settings Read）。
