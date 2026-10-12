@@ -250,4 +250,10 @@ Workers KV Storage Edit + Account Settings Read）。
   什麼都不用傳。當初評估後沒做，因為弱密碼可被離線爆破——猜到房間代碼的人可以把
   密文抓回去慢慢試。要做的話得配 Argon2id 與強度檢查
 - **自訂網域**：現在是 workers.dev 子網域
-- **DO alarm 的實際觸發還沒驗過**（要等真的過一天）
+- **`PairDO` 取走後留下一張空表**：`fetch` 的 GET 路徑在 `deleteAll()` 之後呼叫 `deleteAlarm()`，
+  會把 alarm 的 metadata 表建回來，所以用過的暫存格在 Cloudflare 那邊仍是 `hasStoredData=true`、
+  每個約 12 KB。2026-10-12 本機驗過留下的只有空表、沒有密文，決定不修；
+  PairDO 儲存量明顯成長時再看，改法是把 `deleteAlarm()` 移到 `deleteAll()` 前面（未試）
+
+DO alarm 的實際觸發已在線上驗過（2026-10-12）：09-07 有資料的 75 個 `RoomDO`，
+閒置滿 30 天後只剩 13 個 `hasStoredData=true`，儲存量 2,457,600 → 425,984 bytes。
