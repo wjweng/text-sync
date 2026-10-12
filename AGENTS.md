@@ -255,5 +255,12 @@ Workers KV Storage Edit + Account Settings Read）。
   每個約 12 KB。2026-10-12 本機驗過留下的只有空表、沒有密文，決定不修；
   PairDO 儲存量明顯成長時再看，改法是把 `deleteAlarm()` 移到 `deleteAll()` 前面（未試）
 
+怎麼查線上的 DO 狀態（唯讀，2026-10-12 用過）：實例清單走 REST
+`GET /accounts/<帳號>/workers/durable_objects/namespaces` 取得 namespace id，再
+`GET …/namespaces/<id>/objects?limit=1000`，每筆有 `hasStoredData`；每日儲存量走 GraphQL
+`durableObjectsSqlStorageGroups`（日期範圍一次不要超過幾天，否則會被限流）。
+本機 secrets 的 `CLOUDFLARE_API_TOKEN` 沒有這兩項權限（回 `Authentication error`），
+要用 `npx wrangler login` 之後的登入憑證。
+
 DO alarm 的實際觸發已在線上驗過（2026-10-12）：09-07 有資料的 75 個 `RoomDO`，
 閒置滿 30 天後只剩 13 個 `hasStoredData=true`，儲存量 2,457,600 → 425,984 bytes。
